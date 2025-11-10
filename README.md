@@ -17,20 +17,19 @@ This project serves as a modular component for future integration into the **Sta
 
 ## 🧱 Tech Stack
 
-| Component | Technology |
-|------------|-------------|
-| **Backend** | Django 5.x |
-| **Frontend** | HTML, Bootstrap |
-| **API** | OpenWeatherMap |
-| **Database** | SQLite (default) / PostgreSQL (optional) |
-| **Deployment** | Google Cloud Run / Docker |
-| **Secrets Management** | python-decouple |
+## Component and Technology 
 
----
+**Backend**  Django 5.x 
+**Frontend**  HTML, Bootstrap 
+**API** OpenWeatherMap |
+**Database**  SQLite (default) / PostgreSQL (optional) 
+**Deployment** Google Cloud Run / Docker 
+**Secrets Management** python-decouple 
+
+
 
 ## ⚙️ Installation
 
 1. **Clone the repository**
-   ```bash
    git clone https://github.com/AaronTU856/weather_map_project.git
    cd weather_map_project
