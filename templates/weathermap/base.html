@@ -10,6 +10,9 @@
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     />
+    <!-- Leaflet MarkerCluster CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 
     {% load static %}
     <link rel="stylesheet" href="{% static 'css/styles.css' %}" />
@@ -21,6 +24,11 @@
       <div class="container">
         <h1>Real-Time Weather Map</h1>
         <p>Click on any city to view current weather conditions</p>
+      </div>
+      <div id="search-container" class="container">
+        <input id="city-search" type="search" placeholder="Search cities…" aria-label="Search cities" />
+        <button id="unit-toggle" aria-pressed="false">°C</button>
+        <ul id="search-suggestions" class="search-suggestions" role="listbox" aria-label="Search suggestions"></ul>
       </div>
     </header>
 
@@ -34,6 +42,8 @@
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet MarkerCluster JS -->
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
     {% block extra_js %}{% endblock %}
   </body>

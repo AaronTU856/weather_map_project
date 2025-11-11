@@ -35,8 +35,23 @@ document.addEventListener("DOMContentLoaded", function () {
   }).addTo(map);
   console.log("✅ Map tiles added");
 
+  // Marker clustering (improves performance when many markers are present)
+  let markerClusterGroup;
+  try {
+    markerClusterGroup = L.markerClusterGroup();
+    map.addLayer(markerClusterGroup);
+    console.log("✅ MarkerClusterGroup added to map");
+  } catch (err) {
+    console.warn("⚠️ MarkerCluster plugin not available, falling back to direct markers", err);
+    markerClusterGroup = null;
+  }
+
   // Store markers for reference
   const markers = {};
+  // Store basic city list for search
+  let citiesList = [];
+  // Temperature unit preference: 'C' or 'F'
+  let tempUnit = localStorage.getItem("tempUnit") || "C";
 
   // Custom icon for city markers
   const cityIcon = L.divIcon({
@@ -73,7 +88,7 @@ document.addEventListener("DOMContentLoaded", function () {
         );
       }
 
-      const cities = await response.json();
+  const cities = await response.json();
       console.log(`✅ Loaded ${cities.length} cities:`, cities);
 
       if (cities.length === 0) {
@@ -85,8 +100,17 @@ document.addEventListener("DOMContentLoaded", function () {
       }
 
       console.log("🎯 Starting to add markers for each city...");
-      cities.forEach((city, index) => {
-        console.log(`🔄 Processing city ${index + 1}/${cities.length}:`, city);
+      // Save for search and create markers
+      citiesList = cities.map((c) => ({
+        id: c.id,
+        name: c.name,
+        country: c.country,
+        latitude: c.latitude,
+        longitude: c.longitude,
+      }));
+
+      citiesList.forEach((city, index) => {
+        console.log(`🔄 Processing city ${index + 1}/${citiesList.length}:`, city);
         addCityMarker(city);
       });
 
@@ -121,14 +145,30 @@ document.addEventListener("DOMContentLoaded", function () {
       const marker = L.marker([city.latitude, city.longitude], {
         icon: cityIcon,
         title: `${city.name}, ${city.country}`,
-      }).addTo(map);
+      });
+      // Add marker to cluster group if available, otherwise add directly to map
+      if (markerClusterGroup) markerClusterGroup.addLayer(marker);
+      else marker.addTo(map);
 
-      console.log(`✅ Marker object created:`, marker);
+      // Attach city metadata and a small weather cache
+      marker.cityData = {
+        id: city.id,
+        name: city.name,
+        country: city.country,
+        latitude: city.latitude,
+        longitude: city.longitude,
+      };
+      marker.weatherCache = null; // will store last fetched weather data (metric)
 
-      // Show loading popup on click
+      // Show loading popup on click and fetch weather (if not cached)
       marker.on("click", () => {
         console.log(`🖱️ Clicked on ${city.name}`);
-        fetchWeatherData(city.id, marker);
+        // If cached, display immediately, otherwise fetch
+        if (marker.weatherCache) {
+          displayWeatherPopup(marker.weatherCache, marker);
+        } else {
+          fetchWeatherData(city.id, marker);
+        }
       });
 
       // Store marker reference
@@ -164,9 +204,11 @@ document.addEventListener("DOMContentLoaded", function () {
         );
       }
 
-      const data = await response.json();
-      console.log("✅ Weather data received:", data);
-      displayWeatherPopup(data, marker);
+  const data = await response.json();
+  console.log("✅ Weather data received:", data);
+  // Cache metric data on marker for future unit toggles
+  marker.weatherCache = Object.assign({}, data, { cached_at: Date.now() });
+  displayWeatherPopup(marker.weatherCache, marker);
     } catch (error) {
       console.error("❌ Error fetching weather:", error);
       displayErrorPopup(marker, error.message);
@@ -177,9 +219,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Display weather information in popup
   function displayWeatherPopup(data, marker) {
-    const iconUrl = data.mock_data
-      ? `https://openweathermap.org/img/wn/${data.icon}@2x.png`
-      : `https://openweathermap.org/img/wn/${data.icon}@2x.png`;
+    const iconUrl = `https://openweathermap.org/img/wn/${data.icon}@2x.png`;
 
     // Add indicator for mock data
     const dataSourceIndicator = data.mock_data
@@ -190,7 +230,14 @@ document.addEventListener("DOMContentLoaded", function () {
                 🌐 Live weather data
                </div>`;
 
-    const popupContent = `
+  // Helper to format temperature according to unit
+  function formatTemp(tempC) {
+    if (tempUnit === "C") return `${tempC.toFixed(1)}°C`;
+    const f = (tempC * 9) / 5 + 32;
+    return `${f.toFixed(1)}°F`;
+  }
+
+  const popupContent = `
             <div class="weather-popup">
                 <h3>${data.city}, ${data.country}</h3>
 
@@ -205,14 +252,14 @@ document.addEventListener("DOMContentLoaded", function () {
                     <div class="weather-item">
                         <div>
                             <strong>🌡️ Temperature</strong>
-                            <span>${data.temperature.toFixed(1)}°C</span>
+              <span>${formatTemp(data.temperature)}</span>
                         </div>
                     </div>
 
                     <div class="weather-item">
                         <div>
                             <strong>🤔 Feels Like</strong>
-                            <span>${data.feels_like.toFixed(1)}°C</span>
+              <span>${formatTemp(data.feels_like)}</span>
                         </div>
                     </div>
 
@@ -291,13 +338,127 @@ document.addEventListener("DOMContentLoaded", function () {
   console.log("🚀 Starting weather map application...");
   loadCities();
 
+  // --- Search UI & behavior ---
+  const searchInput = document.getElementById("city-search");
+  const suggestionsEl = document.getElementById("search-suggestions");
+  const unitToggle = document.getElementById("unit-toggle");
+
+  // Set initial unit button state
+  function applyUnitToButton() {
+    if (!unitToggle) return;
+    unitToggle.textContent = tempUnit === "C" ? "°C" : "°F";
+    unitToggle.setAttribute("aria-pressed", tempUnit === "F" ? "true" : "false");
+  }
+  applyUnitToButton();
+
+  // Debounce helper
+  function debounce(fn, delay = 250) {
+    let t;
+    return function (...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), delay);
+    };
+  }
+
+  // Render suggestions under input
+  function renderSuggestions(matches) {
+    if (!suggestionsEl) return;
+    suggestionsEl.innerHTML = "";
+    if (!matches || matches.length === 0) {
+      suggestionsEl.classList.remove("visible");
+      return;
+    }
+    matches.slice(0, 6).forEach((m) => {
+      const li = document.createElement("li");
+      li.textContent = `${m.name}, ${m.country}`;
+      li.setAttribute("role", "option");
+      li.addEventListener("click", () => {
+        // center map and open popup
+        const marker = markers[m.id];
+        if (marker) {
+          map.setView([m.latitude, m.longitude], 10);
+          // trigger click programmatically to open popup / fetch
+          marker.fire("click");
+        }
+        suggestionsEl.classList.remove("visible");
+      });
+      suggestionsEl.appendChild(li);
+    });
+    suggestionsEl.classList.add("visible");
+  }
+
+  // Filter cities and show suggestions
+  const onSearchInput = debounce((ev) => {
+    const q = (ev.target.value || "").trim().toLowerCase();
+    if (q.length === 0) {
+      renderSuggestions([]);
+      return;
+    }
+    const matches = citiesList.filter((c) => c.name.toLowerCase().includes(q));
+    renderSuggestions(matches);
+  }, 180);
+
+  if (searchInput) {
+    searchInput.addEventListener("input", onSearchInput);
+    searchInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        const q = (ev.target.value || "").trim().toLowerCase();
+        if (!q) return;
+        const exact = citiesList.find((c) => c.name.toLowerCase() === q);
+        const first = exact || citiesList.find((c) => c.name.toLowerCase().includes(q));
+        if (first) {
+          const marker = markers[first.id];
+          if (marker) {
+            map.setView([first.latitude, first.longitude], 10);
+            marker.fire("click");
+          }
+        } else {
+          alert("No city matched your search.");
+        }
+        // hide suggestions
+        if (suggestionsEl) suggestionsEl.classList.remove("visible");
+      }
+    });
+  }
+
+  // Unit toggle behavior
+  if (unitToggle) {
+    unitToggle.addEventListener("click", () => {
+      tempUnit = tempUnit === "C" ? "F" : "C";
+      localStorage.setItem("tempUnit", tempUnit);
+      applyUnitToButton();
+      // If any marker has an open popup, update popup contents
+      Object.values(markers).forEach((m) => {
+        if (m.getPopup && m.getPopup() && map.hasLayer(m.getPopup())) {
+          // If cached weather exists, redisplay using cache to apply conversions
+          if (m.weatherCache) displayWeatherPopup(m.weatherCache, m);
+        }
+      });
+    });
+  }
+
+  // Close suggestions when clicking outside
+  document.addEventListener("click", (ev) => {
+    if (!document.getElementById("search-container")) return;
+    const sc = document.getElementById("search-container");
+    if (!sc.contains(ev.target)) {
+      if (suggestionsEl) suggestionsEl.classList.remove("visible");
+    }
+  });
+
   // Add some helpful debugging
   window.debugMap = {
     map: map,
     markers: markers,
     loadCities: loadCities,
     reloadCities: () => {
-      Object.values(markers).forEach((marker) => map.removeLayer(marker));
+      // Clear cluster group if available, otherwise remove marker layers
+      if (markerClusterGroup) {
+        markerClusterGroup.clearLayers();
+      } else {
+        Object.values(markers).forEach((marker) => map.removeLayer(marker));
+      }
       Object.keys(markers).forEach((key) => delete markers[key]);
       loadCities();
     },
